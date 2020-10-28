@@ -1,3 +1,6 @@
 build/
 bin/
 lib/WolkConnect-Cpp/
+src/configuration.json
+src/fileRepository.db
+
