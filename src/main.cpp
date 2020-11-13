@@ -1,384 +1,152 @@
 /*
- * Copyright 2018 WolkAbout Technology s.r.o.
+ * read_write.cpp
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ *  Created on: Dec 18, 2017
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *  Copyright (C) 2017 Pat Deegan, https://psychogenic.com
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *  Usage:
+ *    read_write <device_address> <read|write> <uuid> [<hex-value-to-write>]
+ *
+ *  This file is part of GattLib++.
+ *
+ *  GattLib++ is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *  GattLib++ is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with GattLib++.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "Wolk.h"
-#include "service/FirmwareInstaller.h"
-#include "utilities/ConsoleLogger.h"
-#include "utilities/FileSystemUtils.h"
-#include "utilities/json.hpp"
-
-#include <chrono>
-#include <csignal>
+#include <Gattlibpp.h>
 #include <iostream>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <thread>
+#include <unistd.h> // for usleep
 
-std::function<void(int)> sigintCall;
+#define MSG_OUT(...) std::cout << __VA_ARGS__
+#define MSG_OUTLN(...) std::cout << std::endl << __VA_ARGS__ << std::endl;
 
-void sigintResponse(int signal)
-{
-    if (sigintCall != nullptr)
-        sigintCall(signal);
+#define DBG_ENABLED
+
+#ifdef DBG_ENABLED
+#define DBG_OUT(...) std::cerr << __VA_ARGS__
+#define DBG_OUTLN(...) std::cerr << std::endl << __VA_ARGS__ << std::endl
+#else
+#define DBG_OUT(...)
+#define DBG_OUTLN(...)
+#endif
+
+// forward decl
+void useEnabledBLECentral(const std::string &device);
+
+int main(int argc, char *argv[]) {
+  const std::string device = "F8:A4:4B:F4:F7:06";
+
+  Gattlib::BLECentral::getInstance()->enable(
+      // enable worked out:
+      [&device]() {
+        MSG_OUTLN("Device enabled");
+        // ready to go! this will start up a chain of operations
+        useEnabledBLECentral(device);
+      },
+      // enable failed...
+      []() {
+        MSG_OUTLN("Could not even enable device, such sadness.");
+        MSG_OUTLN("Check that bluetooth is up & running and that we can "
+                  "actually use it.");
+      });
+
+  while (1) {
+    // our processAsync() call
+    Gattlib::BLECentral::getInstance()->processAsync();
+
+    // whatever else we want to do... here we'll
+    // just sleep
+
+    usleep(50000);
+  }
 }
 
-const std::string configJsonPath = "./configuration.json";
-
-bool writeFile(const std::string& path, const std::vector<wolkabout::ConfigurationItem>& configuration)
-{
-    std::string content = "[";
-
-    for (uint i = 0; i < configuration.size(); i++)
-    {
-        const auto& config = configuration.at(i);
-
-        const auto& obj = nlohmann::json{{"reference", config.getReference()}, {"values", config.getValues()}};
-
-        content += obj.dump();
-
-        if (i < (configuration.size() - 1))
-        {
-            content += ',';
-        }
+void PrintInput(const Gattlib::BinaryBuffer &data) {
+  // got them tasty bytes back
+  MSG_OUT("Bytes received: ");
+  bool allAscii = true;
+  for (Gattlib::BinaryBuffer::const_iterator iter = data.begin();
+       iter != data.end(); iter++) {
+    MSG_OUT((int)*iter << " ");
+    if ((*iter) < 0x09 || (*iter) > 0x7E) {
+      allAscii = false;
     }
+  }
+  MSG_OUT(std::endl);
 
-    content += "]";
-
-    try
-    {
-        wolkabout::FileSystemUtils::createFileWithContent(path, content);
+  // they were all 'printable' bytes, so lets do that too
+  if (allAscii) {
+    MSG_OUT("As ASCII: ");
+    for (Gattlib::BinaryBuffer::const_iterator iter = data.begin();
+         iter != data.end(); iter++) {
+      MSG_OUT((char)*iter);
     }
-    catch (std::exception& e)
-    {
-        LOG(ERROR) << e.what();
-        throw std::logic_error("Unable to write configurations to output file.");
-    }
-
-    return true;
+    MSG_OUT(std::endl);
+  }
 }
 
-std::vector<wolkabout::ConfigurationItem> readFile(const std::string& path)
-{
-    if (!wolkabout::FileSystemUtils::isFilePresent(path))
-    {
-        //        throw std::logic_error("Given file does not exist (" + path + ").");
-        return std::vector<wolkabout::ConfigurationItem>();
-    }
-
-    std::string jsonString;
-    if (!wolkabout::FileSystemUtils::readFileContent(path, jsonString))
-    {
-        throw std::logic_error("Unable to read file (" + path + ").");
-    }
-
-    try
-    {
-        const auto& arr = nlohmann::json::parse(jsonString);
-        std::vector<wolkabout::ConfigurationItem> configuration;
-
-        for (const auto& obj : arr)
-        {
-            configuration.emplace_back(obj["values"], obj["reference"]);
-        }
-
-        return configuration;
-    }
-    catch (std::exception&)
-    {
-        throw std::logic_error("Unable to parse file (" + path + ").");
-    }
+void TemperatureCallback(const Gattlib::BinaryBuffer &data) {
+  PrintInput(data);
+  // TODO: lcubrilo
 }
 
-int main(int /* argc */, char** /* argv */)
-{
-    auto logger = std::unique_ptr<wolkabout::ConsoleLogger>(new wolkabout::ConsoleLogger());
-    logger->setLogLevel(wolkabout::LogLevel::INFO);
-    logger->flushEvery(std::chrono::seconds{10});
-    logger->flushAt(wolkabout::LogLevel::INFO);
-    wolkabout::Logger::setInstance(std::move(logger));
+void HumidityCallback(const Gattlib::BinaryBuffer &data) {
+  PrintInput(data);
+  // TODO: lcubrilo
+}
 
-    std::function<void(std::string)> setLogLevel = [&](std::string level) {
-        std::transform(level.begin(), level.end(), level.begin(), [&](char c) { return std::tolower(c); });
+void PressureCallback(const Gattlib::BinaryBuffer &data) {
+  PrintInput(data);
+  // TODO: lcubrilo
+}
 
-        if (level == "trace")
-        {
-            wolkabout::Logger::getInstance()->setLogLevel(wolkabout::LogLevel::TRACE);
-        }
-        else if (level == "debug")
-        {
-            wolkabout::Logger::getInstance()->setLogLevel(wolkabout::LogLevel::DEBUG);
-        }
-        else if (level == "info")
-        {
-            wolkabout::Logger::getInstance()->setLogLevel(wolkabout::LogLevel::INFO);
-        }
-        else if (level == "warn")
-        {
-            wolkabout::Logger::getInstance()->setLogLevel(wolkabout::LogLevel::WARN);
-        }
-        else if (level == "error")
-        {
-            wolkabout::Logger::getInstance()->setLogLevel(wolkabout::LogLevel::ERROR);
-        }
-    };
+void failedCallback() {
+  MSG_OUTLN("Last operation failed!.");
+}
 
-    wolkabout::Device device("device_key", "some_password", {"SW", "SL"});
+void useEnabledBLECentral(const std::string &device) {
 
-    static bool switchValue = false;
-    static int sliderValue = 0;
+  Gattlib::BLECentral *central = Gattlib::BLECentral::getInstance();
+  central->connectionParameters().security = BT_SEC_LOW;
+  central->connectionParameters().destinationType = Gattlib::Address::LE_PUBLIC;
 
-    static int deviceFirmwareVersion = 1;
+  MSG_OUTLN("Connecting to: " << device);
+  central->connect(
+      device,
+      // connect success callback
+      [=]() {
+        MSG_OUTLN("Connection established");
 
-    class FirmwareInstallerImpl : public wolkabout::FirmwareInstaller
-    {
-    public:
-        void install(const std::string& firmwareFile, std::function<void()> onSuccess,
-                     std::function<void()> onFail) override
-        {
-            // Mock install
-            LOG(INFO) << "Updating firmware with file " << firmwareFile;
+        // Temperature
+        if (central->startNotification(device, "0xCCC0", "0xCCC1",
+                                       TemperatureCallback, failedCallback))
+          std::cout << "Registered to 0xCCC0 callback!" << std::endl;
+        else
+          std::cout << "Failed to register to 0xCCC0 callback!" << std::endl;
 
-            // Determine installation outcome and report it
-            if (true)
-            {
-                ++deviceFirmwareVersion;
-                onSuccess();
-            }
-            else
-            {
-                onFail();
-            }
-        }
+        // Humidity
+        if (central->startNotification(device, "0xDDD0", "0xDDD1",
+                                       HumidityCallback, failedCallback))
+          std::cout << "Registered to 0xDDD0 callback!" << std::endl;
+        else
+          std::cout << "Failed to register to 0xDDD0 callback!" << std::endl;
 
-        bool abort() override
-        {
-            LOG(INFO) << "Abort device firmware installation";
-            // true if successfully aborted or false if abort can not be performed
-            return true;
-        }
-    };
-
-    class FirmwareVersionProviderImpl : public wolkabout::FirmwareVersionProvider
-    {
-    public:
-        std::string getFirmwareVersion() override { return std::to_string(deviceFirmwareVersion) + ".0.0"; }
-    };
-
-    auto installer = std::make_shared<FirmwareInstallerImpl>();
-    auto provider = std::make_shared<FirmwareVersionProviderImpl>();
-
-    class DeviceConfiguration : public wolkabout::ConfigurationProvider, public wolkabout::ConfigurationHandler
-    {
-    public:
-        DeviceConfiguration()
-        {
-            const auto& value = readFile(configJsonPath);
-            if (value.empty())
-            {
-                const auto& hb = wolkabout::ConfigurationItem({"10"}, "HB");
-                const auto& ef = wolkabout::ConfigurationItem({"P,T,H,ACL"}, "EF");
-                const auto& ll = wolkabout::ConfigurationItem({"INFO"}, "LL");
-
-                m_configuration.emplace("HB", hb);
-                m_configuration.emplace("EF", ef);
-                m_configuration.emplace("LL", ll);
-
-                writeFile(configJsonPath, {hb, ef, ll});
-            }
-            else
-            {
-                for (const auto& config : value)
-                {
-                    m_configuration.emplace(config.getReference(), config);
-                }
-            }
-        }
-
-        std::vector<wolkabout::ConfigurationItem> getConfiguration() override
-        {
-            std::lock_guard<decltype(m_ConfigurationMutex)> l(m_ConfigurationMutex);    // Must be thread safe
-            std::vector<wolkabout::ConfigurationItem> configurations;
-            for (const auto& config : m_configuration)
-            {
-                configurations.emplace_back(config.second);
-            }
-            return configurations;
-        }
-
-        void handleConfiguration(const std::vector<wolkabout::ConfigurationItem>& configuration) override
-        {
-            std::lock_guard<decltype(m_ConfigurationMutex)> l(m_ConfigurationMutex);    // Must be thread safe
-            for (const auto& config : configuration)
-            {
-                const auto& it = m_configuration.find(config.getReference());
-                if (it != m_configuration.end())
-                {
-                    it->second = config;
-                }
-                else
-                {
-                    m_configuration.emplace(config.getReference(), config);
-                }
-            }
-
-            std::vector<wolkabout::ConfigurationItem> configVector;
-            for (const auto& config : m_configuration)
-            {
-                configVector.emplace_back(config.second);
-            }
-
-            writeFile(configJsonPath, configVector);
-        }
-
-    private:
-        std::mutex m_ConfigurationMutex;
-        std::map<std::string, wolkabout::ConfigurationItem> m_configuration;
-    };
-    auto deviceConfiguration = std::make_shared<DeviceConfiguration>();
-
-    std::unique_ptr<wolkabout::Wolk> wolk =
-      wolkabout::Wolk::newBuilder(device)
-        .actuationHandler([&](const std::string& reference, const std::string& value) -> void {
-            LOG(DEBUG) << "Actuation request received - Reference: " << reference << " value: " << value;
-
-            if (reference == "SW")
-            {
-                switchValue = value == "true";
-            }
-            else if (reference == "SL")
-            {
-                try
-                {
-                    sliderValue = std::stoi(value);
-                }
-                catch (...)
-                {
-                    sliderValue = 0;
-                }
-            }
-        })
-        .actuatorStatusProvider([&](const std::string& reference) -> wolkabout::ActuatorStatus {
-            if (reference == "SW")
-            {
-                return wolkabout::ActuatorStatus(switchValue ? "true" : "false",
-                                                 wolkabout::ActuatorStatus::State::READY);
-            }
-            else if (reference == "SL")
-            {
-                return wolkabout::ActuatorStatus(std::to_string(sliderValue), wolkabout::ActuatorStatus::State::READY);
-            }
-
-            return wolkabout::ActuatorStatus("", wolkabout::ActuatorStatus::State::READY);
-        })
-        .configurationHandler(deviceConfiguration)
-        .configurationProvider(deviceConfiguration)
-        .withFileManagement("files", 1024 * 1024)
-        .withFirmwareUpdate(installer, provider)
-        .host("ssl://api-demo.wolkabout.com:8883")
-        .build();
-
-    wolk->connect();
-
-    uint16_t heartbeat = 0;
-    for (const auto& config : deviceConfiguration->getConfiguration())
-    {
-        if (config.getReference() == "HB")
-        {
-            heartbeat = static_cast<uint16_t>(std::stoi(config.getValues()[0]));
-        }
-        if (config.getReference() == "LL")
-        {
-            if (setLogLevel)
-                setLogLevel(config.getValues()[0]);
-        }
-    }
-
-    bool running = true;
-    sigintCall = [&](int signal) {
-        LOG(WARN) << "Application: Received stop signal, disconnecting...";
-        running = false;
-        if (wolk)
-            wolk->disconnect();
-        exit(signal);
-    };
-    signal(SIGINT, sigintResponse);
-
-    while (running)
-    {
-        for (const auto& config : deviceConfiguration->getConfiguration())
-        {
-            if (config.getReference() == "HB")
-            {
-                heartbeat = static_cast<uint16_t>(std::stoi(config.getValues()[0]));
-            }
-            if (config.getReference() == "LL")
-            {
-                if (setLogLevel)
-                    setLogLevel(config.getValues()[0]);
-            }
-        }
-
-        LOG(DEBUG) << "Heartbeat is: " << heartbeat;
-        LOG(DEBUG) << "Last received timestamp : " << wolk->getLastTimestamp();
-
-        if (running)
-            std::this_thread::sleep_for(std::chrono::seconds(heartbeat));
-
-        const auto& configVector = deviceConfiguration->getConfiguration();
-
-        auto index =
-          std::find_if(configVector.begin(), configVector.end(),
-                       [&](const wolkabout::ConfigurationItem& config) { return config.getReference() == "EF"; });
-        std::string configString;
-        bool validConfig = false;
-
-        if (index != configVector.end())
-        {
-            validConfig = true;
-            if (!index->getValues().empty())
-                configString = index->getValues()[0];
-        }
-
-        if (!validConfig || configString.find('P') != std::string::npos)
-        {
-            wolk->addSensorReading("P", (rand() % 801 + 300));
-        }
-
-        if (!validConfig || configString.find('H') != std::string::npos)
-        {
-            const auto& val = (rand() % 1000 * 0.1);
-            wolk->addSensorReading("H", val);
-            wolk->addAlarm("HH", val > 90);
-        }
-
-        if (!validConfig || configString.find('T') != std::string::npos)
-        {
-            wolk->addSensorReading("T", (rand() % 126 - 40));
-        }
-
-        if (!validConfig || configString.find("ACL") != std::string::npos)
-        {
-            wolk->addSensorReading("ACL", {rand() % 100001 * 0.001, rand() % 100001 * 0.001, rand() % 100001 * 0.001});
-        }
-
-        wolk->publish();
-    }
-
-    wolk->disconnect();
-    return 0;
+        // Pressure
+        if (central->startNotification(device, "0xEEE0", "0xEEE1",
+                                       PressureCallback, failedCallback))
+          std::cout << "Registered to 0xEEE0 callback!" << std::endl;
+        else
+          std::cout << "Failed to register to 0xEEE0 callback!" << std::endl;
+      });
 }
