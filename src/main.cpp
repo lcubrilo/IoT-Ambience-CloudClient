@@ -59,6 +59,9 @@ int main(int argc, char *argv[]) {
         [&]() {
           std::cout << "Device enabled. Scanning all devices." << std::endl;
 
+          // TODO: It seems that even offline devices get stashed somewhere
+          // Nevertheless, we will terminate if we fail to connect to it
+          // Maybe clear the bluetooth cache somehow
           Gattlib::BLECentral::getInstance()->scan(
               serviceUuids, 15,
               // scan completed
@@ -184,8 +187,10 @@ void useEnabledBLECentral(
         else
           std::cout << "Failed to register to " << characteristicUuids[2]
                     << " callback!" << std::endl;
-      }, [](){
-        std::cout << "Failed to connect to device." << std::endl << "Terminating..." << std::endl;
+      },
+      []() {
+        std::cout << "Failed to connect to device." << std::endl
+                  << "Terminating..." << std::endl;
         std::terminate();
       });
 }
