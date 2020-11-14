@@ -42,24 +42,51 @@
 #endif
 
 // forward decl
-void useEnabledBLECentral(const std::string &device);
+void useEnabledBLECentral(const std::string &device,
+                          const Gattlib::Service::UUIDList serviceUuids,
+                          const Gattlib::Service::UUIDList characteristicUuids);
 
 int main(int argc, char *argv[]) {
-  const std::string device = "F8:A4:4B:F4:F7:06";
 
-  Gattlib::BLECentral::getInstance()->enable(
-      // enable worked out:
-      [&device]() {
-        MSG_OUTLN("Device enabled");
-        // ready to go! this will start up a chain of operations
-        useEnabledBLECentral(device);
-      },
-      // enable failed...
-      []() {
-        MSG_OUTLN("Could not even enable device, such sadness.");
-        MSG_OUTLN("Check that bluetooth is up & running and that we can "
-                  "actually use it.");
-      });
+  const std::string device = "F8:A4:4B:F4:F7:06";
+  const Gattlib::Service::UUIDList serviceUuids{"0xCCC0", "0xDDD0", "0xEEE0"};
+  const Gattlib::Service::UUIDList characteristicUuids{"0xCCC1", "0xDDD1",
+                                                       "0xEEE1"};
+  bool foundDevice = false;
+
+  try {
+    Gattlib::BLECentral::getInstance()->enable(
+        [&]() {
+          std::cout << "Device enabled. Scanning all devices." << std::endl;
+
+          Gattlib::BLECentral::getInstance()->scan(
+              serviceUuids, 15,
+              // scan completed
+              [&device, &foundDevice, &serviceUuids, &characteristicUuids]() {
+                std::cout << "Scan completed." << std::endl;
+                if (foundDevice)
+                  useEnabledBLECentral(device, serviceUuids,
+                                       characteristicUuids);
+                else {
+                  std::cout << "Cannot find desired device. Shutting down."
+                            << std::endl;
+                  std::terminate();
+                }
+              },
+              // discovery process
+              [&device, &foundDevice](const Gattlib::Discovery::Device &dev) {
+                std::cout << "Discovered device: " << dev.id << std::endl;
+                if (dev.id == device) {
+                  std::cout << "Found desired device." << std::endl;
+                  foundDevice = true;
+                }
+              },
+              []() { std::cout << "Failed." << std::endl; });
+        },
+        []() { std::cout << "FAILED TO ENABLE." << std::endl; });
+  } catch (std::exception &e) {
+    std::cout << "Exception occured: " << e.what() << std::endl;
+  }
 
   while (1) {
     // our processAsync() call
@@ -111,11 +138,11 @@ void PressureCallback(const Gattlib::BinaryBuffer &data) {
   // TODO: lcubrilo
 }
 
-void failedCallback() {
-  MSG_OUTLN("Last operation failed!.");
-}
+void failedCallback() { MSG_OUTLN("Last operation failed!."); }
 
-void useEnabledBLECentral(const std::string &device) {
+void useEnabledBLECentral(
+    const std::string &device, const Gattlib::Service::UUIDList serviceUuids,
+    const Gattlib::Service::UUIDList characteristicUuids) {
 
   Gattlib::BLECentral *central = Gattlib::BLECentral::getInstance();
   central->connectionParameters().security = BT_SEC_LOW;
@@ -129,24 +156,36 @@ void useEnabledBLECentral(const std::string &device) {
         MSG_OUTLN("Connection established");
 
         // Temperature
-        if (central->startNotification(device, "0xCCC0", "0xCCC1",
+        if (central->startNotification(device, serviceUuids[0],
+                                       characteristicUuids[0],
                                        TemperatureCallback, failedCallback))
-          std::cout << "Registered to 0xCCC0 callback!" << std::endl;
+          std::cout << "Registered to " << characteristicUuids[0]
+                    << " callback!" << std::endl;
         else
-          std::cout << "Failed to register to 0xCCC0 callback!" << std::endl;
+          std::cout << "Failed to register to " << characteristicUuids[0]
+                    << " callback!" << std::endl;
 
         // Humidity
-        if (central->startNotification(device, "0xDDD0", "0xDDD1",
-                                       HumidityCallback, failedCallback))
-          std::cout << "Registered to 0xDDD0 callback!" << std::endl;
+        if (central->startNotification(device, serviceUuids[1],
+                                       characteristicUuids[1], HumidityCallback,
+                                       failedCallback))
+          std::cout << "Registered to " << characteristicUuids[1]
+                    << " callback!" << std::endl;
         else
-          std::cout << "Failed to register to 0xDDD0 callback!" << std::endl;
+          std::cout << "Failed to register to " << characteristicUuids[1]
+                    << " callback!" << std::endl;
 
         // Pressure
-        if (central->startNotification(device, "0xEEE0", "0xEEE1",
-                                       PressureCallback, failedCallback))
-          std::cout << "Registered to 0xEEE0 callback!" << std::endl;
+        if (central->startNotification(device, serviceUuids[2],
+                                       characteristicUuids[2], PressureCallback,
+                                       failedCallback))
+          std::cout << "Registered to " << characteristicUuids[2]
+                    << " callback!" << std::endl;
         else
-          std::cout << "Failed to register to 0xEEE0 callback!" << std::endl;
+          std::cout << "Failed to register to " << characteristicUuids[2]
+                    << " callback!" << std::endl;
+      }, [](){
+        std::cout << "Failed to connect to device." << std::endl << "Terminating..." << std::endl;
+        std::terminate();
       });
 }
