@@ -27,6 +27,7 @@
 #include <Gattlibpp.h>
 #include <iostream>
 #include <unistd.h> // for usleep
+#include "Wolk.h"
 
 #define MSG_OUT(...) std::cout << __VA_ARGS__
 #define MSG_OUTLN(...) std::cout << std::endl << __VA_ARGS__ << std::endl;
@@ -45,6 +46,8 @@
 void useEnabledBLECentral(const std::string &device,
                           const Gattlib::Service::UUIDList serviceUuids,
                           const Gattlib::Service::UUIDList characteristicUuids);
+
+std::unique_ptr<wolkabout::Wolk> wolk;
 
 int main(int argc, char *argv[]) {
 
@@ -91,6 +94,14 @@ int main(int argc, char *argv[]) {
     std::cout << "Exception occured: " << e.what() << std::endl;
   }
 
+  //Wolk setup
+  wolkabout::Device rpi("bb86af2c-a5d5-4636-a135-e94a8952f1a9", "FNRPTG30M7");
+
+  wolk = wolkabout::Wolk::newBuilder(rpi).host("ssl://api-demo.wolkabout.com:8883").build();
+
+  wolk->connect();
+  std::cout << "Connected to Wolk." << std::endl;
+
   while (1) {
     // our processAsync() call
     Gattlib::BLECentral::getInstance()->processAsync();
@@ -102,46 +113,51 @@ int main(int argc, char *argv[]) {
   }
 }
 
-void PrintInput(const Gattlib::BinaryBuffer &data) {
+void FormatResponse(const Gattlib::BinaryBuffer &data,
+                const std::string &helloMsg, int& val) {
   // got them tasty bytes back
+  std::cout << helloMsg << std::endl;
   MSG_OUT("Bytes received: ");
-  bool allAscii = true;
   for (Gattlib::BinaryBuffer::const_iterator iter = data.begin();
        iter != data.end(); iter++) {
     MSG_OUT((int)*iter << " ");
-    if ((*iter) < 0x09 || (*iter) > 0x7E) {
-      allAscii = false;
-    }
   }
   MSG_OUT(std::endl);
 
-  // they were all 'printable' bytes, so lets do that too
-  if (allAscii) {
-    MSG_OUT("As ASCII: ");
-    for (Gattlib::BinaryBuffer::const_iterator iter = data.begin();
-         iter != data.end(); iter++) {
-      MSG_OUT((char)*iter);
-    }
-    MSG_OUT(std::endl);
-  }
+  val = data[0];
+  val += data[1] << 8;
+  std::cout << "Formatted value: " << val << std::endl << std::endl;
 }
 
 void TemperatureCallback(const Gattlib::BinaryBuffer &data) {
-  PrintInput(data);
-  // TODO: lcubrilo
+  int val = 0;
+  FormatResponse(data, "Temperature", val);
+
+  wolk->addSensorReading("temp", val);
+  wolk->publish();
 }
 
 void HumidityCallback(const Gattlib::BinaryBuffer &data) {
-  PrintInput(data);
-  // TODO: lcubrilo
+  int val = 0;
+  FormatResponse(data, "Humidity", val);
+
+  wolk->addSensorReading("humid", val);
+  wolk->publish();
 }
 
 void PressureCallback(const Gattlib::BinaryBuffer &data) {
-  PrintInput(data);
-  // TODO: lcubrilo
+  int val = 0;
+  FormatResponse(data, "Pressure", val);
+
+  wolk->addSensorReading("press", val);
+  wolk->publish();
 }
 
-void failedCallback() { MSG_OUTLN("Last operation failed!."); }
+void failedCallback() {
+  MSG_OUTLN("Last operation failed!.");
+  std::cout << "Terminating..." << std::endl;
+  std::terminate();
+}
 
 void useEnabledBLECentral(
     const std::string &device, const Gattlib::Service::UUIDList serviceUuids,

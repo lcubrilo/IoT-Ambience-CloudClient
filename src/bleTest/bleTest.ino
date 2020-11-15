@@ -49,13 +49,6 @@ void blututSetup() {
   Serial.println("setapovao");
 }
 
-void sendValues(int t, int p, int h) {
-  tc.setValue(t);
- pc.setValue(p);
-  hc.setValue(h);
-  Serial.println("Poslao na BLE.");
-}
-
 bool BLEconnected = false;
 void connectToBLE() {
   BLEconnected = true;
@@ -68,7 +61,6 @@ void disconnectFromBLE() {
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("EEEE");
   blututSetup();
   senzor.begin();
 }
@@ -76,25 +68,19 @@ void setup() {
 void loop() {
   blutut.poll();
   int currentMilis = millis(); //How much time has passed
-  if (currentMilis - pPreviousMillis > 1100 && BLEconnected) //Not enough time since last time? skip.
+  if (currentMilis - pPreviousMillis > 2000 && BLEconnected) //Not enough time since last time? skip.
   {
-    hc.setValue(++i);
-    Serial.print("Sent hc: ");
-    Serial.println(i);
+    hc.setValue(random(0,100));
     pPreviousMillis = currentMilis;
   } 
-  if (currentMilis - hPreviousMillis > 1200 && BLEconnected)
+  if (currentMilis - hPreviousMillis > 2100 && BLEconnected)
   {
-    pc.setValue(++i);
-    Serial.print("Sent pc: ");
-    Serial.println(i);
+    pc.setValue(random(0,100));
     hPreviousMillis = currentMilis;
   } 
-  if (currentMilis - tPreviousMillis > 1300 && BLEconnected)
+  if (currentMilis - tPreviousMillis > 2200 && BLEconnected)
   {
-    tc.setValue(++i);
-    Serial.print("Sent tc: ");
-    Serial.println(i);
+    tc.setValue(random(0,100));
     tPreviousMillis = currentMilis;
   }
 }
