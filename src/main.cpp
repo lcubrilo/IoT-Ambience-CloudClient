@@ -19,7 +19,7 @@ void notificationCallback(const Gattlib::BinaryBuffer &data, AirCharacteristic x
 	//First package represents last 2 digits and vice versa
 	//Sometimes the first 2 digits are zeros. We don't care about them.
 	int firstPacket = (int)*i++, secondPacket = (int)*i;
-	int value = secondPacket*16*16 + firstPacket;
+	int value = secondPacket << 8 + firstPacket;
 	
 	switch(x){
 		case TEMP: wolk -> addSensorReading("T", value); std::cout << "Temp: " << value << std::endl; break;
@@ -42,6 +42,12 @@ void humiCallback(const Gattlib::BinaryBuffer &data){
 
 int main(int argc, char *argv[]) 
 {
+	//Wolk setup
+	wolkabout::Device WolkDeviceCredentials("471d6850-8bed-4eca-9e6e-97fd9300b117", "5B2OD76EC4");
+    wolk = wolkabout::Wolk::newBuilder(WolkDeviceCredentials).host("ssl://api-demo.wolkabout.com:8883").build();
+    wolk->connect();
+	std::cout << "Connected to Wolk." << std::endl;
+	
 	//BLE setup	
 	arduino -> enable([]//succ enable
 	{
@@ -59,23 +65,21 @@ int main(int argc, char *argv[])
 		,[]//fail connect
 		{
 			std::cout << "Failed connect.";
+			wolk->disconnect();
+			std::terminate();
 		});
 	}
 	,[]//fail enable
 	{
 		std::cout << "Failed enable.";
+		wolk->disconnect();
+		std::terminate();
 	});
-	
-	
-	//Wolk setup
-	wolkabout::Device WolkDeviceCredentials("471d6850-8bed-4eca-9e6e-97fd9300b117", "5B2OD76EC4");
-    wolk = wolkabout::Wolk::newBuilder(WolkDeviceCredentials).host("ssl://api-demo.wolkabout.com:8883").build();
-    wolk->connect();
-	std::cout << "Connected to Wolk." << std::endl;
 	
 	while (1) 
 	{
 		arduino -> processAsync();
 		usleep(50000);
 	}
+	wolk->disconnect();
 }
