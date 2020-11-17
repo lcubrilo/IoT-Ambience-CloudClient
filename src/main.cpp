@@ -49,31 +49,36 @@ int main(int argc, char *argv[])
 	std::cout << "Connected to Wolk." << std::endl;
 	
 	//BLE setup	
-	arduino -> enable([]//succ enable
+	arduino -> enable([]()//succ enable
 	{
 		std::cout << "Enabled BLE connection." << std::endl;
 		arduino -> connectionParameters().security = BT_SEC_LOW;
 		arduino -> connectionParameters().destinationType = Gattlib::Address::LE_PUBLIC;
 		
-		arduino -> connect(BLEDeviceUUID,[]//succ connect
+		arduino -> connect(BLEDeviceUUID,[]()//succ connect
 		{
 			std::cout << "Connected to a BLE device." << std::endl;
 			arduino -> startNotification(BLEDeviceUUID, serviceUUIDs[TEMP], characteristicUUIDs[TEMP], tempCallback);
 			arduino -> startNotification(BLEDeviceUUID, serviceUUIDs[PRES], characteristicUUIDs[PRES], presCallback);
 			arduino -> startNotification(BLEDeviceUUID, serviceUUIDs[HUMI], characteristicUUIDs[HUMI], humiCallback);	
 		}
-		,[]//fail connect
+		,[]()//fail connect
 		{
 			std::cout << "Failed connect.";
 			wolk->disconnect();
 			std::terminate();
 		});
-	});
+	},[]()//fail enable
+	{
+		std::cout << "Failed connect.";
+		wolk->disconnect();
+		std::terminate();
+	}
+	);
 	
 	while (1) 
 	{
 		arduino -> processAsync();
 		usleep(50000);
 	}
-	wolk->disconnect();
 }
