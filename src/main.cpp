@@ -19,7 +19,7 @@ void notificationCallback(const Gattlib::BinaryBuffer &data, AirCharacteristic x
 	//First package represents last 2 digits and vice versa
 	//Sometimes the first 2 digits are zeros. We don't care about them.
 	int firstPacket = (int)*i++, secondPacket = (int)*i;
-	int value = secondPacket << 8 + firstPacket;
+	int value = (secondPacket << 8) + firstPacket;
 	
 	switch(x){
 		case TEMP: wolk -> addSensorReading("T", value); std::cout << "Temp: " << value << std::endl; break;
@@ -68,12 +68,6 @@ int main(int argc, char *argv[])
 			wolk->disconnect();
 			std::terminate();
 		});
-	}
-	,[]//fail enable
-	{
-		std::cout << "Failed enable.";
-		wolk->disconnect();
-		std::terminate();
 	});
 	
 	while (1) 
